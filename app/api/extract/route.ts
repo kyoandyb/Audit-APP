@@ -1,17 +1,19 @@
 import { GoogleGenAI } from '@google/genai';
 
-// 1. 新版寫法：必須傳入帶有 apiKey 屬性的物件
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+// 【地雷 2 破解】設定 API 最長執行時間為 60 秒，避免 Vercel 提早切斷語音分析
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
     const { text, audio, mimeType } = await req.json();
 
+    // 【地雷 1 破解】把初始化移進來，確保每一次請求都能拿到最新的環境變數
     if (!process.env.GEMINI_API_KEY) {
-      throw new Error("找不到 GEMINI_API_KEY，請檢查 .env.local");
+      throw new Error("找不到 GEMINI_API_KEY，請檢查 .env.local 或 Vercel 設定");
     }
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    // 2. 準備要餵給 AI 的資料 (包含提示詞與音檔)
+    // 準備要餵給 AI 的資料
     let parts: any[] = [
       { text: `你是一個專業品質稽核助理。請聽這段語音，並擷取以下資訊：
       1. 站別 (若無明確提及則填無，禁止腦補)
@@ -22,9 +24,12 @@ export async function POST(req: Request) {
     ];
 
     if (audio) {
+      // 【地雷 3 破解】防呆機制：如果前端傳來的 base64 帶有逗號前綴，把它切乾淨
+      const cleanBase64 = audio.includes(',') ? audio.split(',')[1] : audio;
+
       parts.push({
         inlineData: {
-          data: audio,
+          data: cleanBase64,
           mimeType: mimeType || "audio/webm",
         }
       });
@@ -32,9 +37,9 @@ export async function POST(req: Request) {
       parts.push({ text: `口述內容：${text}` });
     }
 
-    // 3. 新版寫法：直接呼叫 ai.models.generateContent
+    // 呼叫模型 (使用最便宜的 gemini-2.5-flash-lite)
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.5-flash-lite',
       contents: parts,
       config: {
         responseMimeType: "application/json",
@@ -50,7 +55,7 @@ export async function POST(req: Request) {
       }
     });
 
-    // 4. 新版回傳文字的方式
+    // 回傳 JSON 給前端
     return new Response(response.text, {
       headers: { "Content-Type": "application/json" },
     });
